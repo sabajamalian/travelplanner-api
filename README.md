@@ -61,6 +61,7 @@ pip install -r requirements.txt
 ```bash
 python -c "from database.db import init_db; init_db()"
 ```
+or maybe just follow readme in database dir
 
 ### Running the Server
 
@@ -74,13 +75,13 @@ python start_server.py
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-The API will be available at `http://localhost:8000`
+The API will be available at `http://localhost:5555`
 
 ### API Documentation
 
 Once the server is running, you can access:
-- Interactive API docs: `http://localhost:8000/docs`
-- ReDoc documentation: `http://localhost:8000/redoc`
+- Interactive API docs: `http://localhost:5555/docs`
+- ReDoc documentation: `http://localhost:5555/redoc`
 
 ## API Endpoints
 
@@ -138,4 +139,4 @@ CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License.# travelplanner-api
