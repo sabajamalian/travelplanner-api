@@ -102,6 +102,37 @@ class GetTravelResponse(BaseModel):
     success: bool = True
     data: SingleTravelResponse
 
+# New models for comprehensive travel details with events
+class EventDetailResponse(BaseModel):
+    id: int
+    title: str
+    description: Optional[str] = None
+    event_type_id: int
+    event_type_name: Optional[str] = None
+    event_type_color: Optional[str] = None
+    event_type_icon: Optional[str] = None
+    start_datetime: str
+    end_datetime: str
+    location: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+class ComprehensiveTravelResponse(BaseModel):
+    id: int
+    title: str
+    description: Optional[str] = None
+    start_date: str
+    end_date: str
+    destination: Optional[str] = None
+    events: List[EventDetailResponse] = []
+    total_events: int = 0
+    created_at: str
+    updated_at: str
+
+class GetComprehensiveTravelResponse(BaseModel):
+    success: bool = True
+    data: ComprehensiveTravelResponse
+
 class UpdateTravelRequest(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=255, description="Travel title")
     description: Optional[str] = Field(None, max_length=1000, description="Travel description")
@@ -483,6 +514,7 @@ async def travels_health_check():
             "GET /deleted",
             "POST /",
             "GET /{id}",
+            "GET /{id}/details",
             "PUT /{id}",
             "DELETE /{id}",
             "POST /{id}/restore"
@@ -529,13 +561,7 @@ async def create_travel(
                 detail="start_date must be before end_date"
             )
         
-        # Check if start_date is not in the past (optional business rule)
-        today = date.today()
-        if start_date < today:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="start_date cannot be in the past"
-            )
+        # Note: start_date can be in the past to allow for historical travel planning
         
         # Sanitize input data
         sanitized_title = sanitize_input(travel_data.title) if travel_data.title else ""
@@ -741,6 +767,129 @@ async def get_travel(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve travel"
+        )
+
+# Route: GET /:id/details - Get comprehensive travel details with all events
+@router.get("/{travel_id}/details", response_model=GetComprehensiveTravelResponse)
+async def get_comprehensive_travel(
+    request: Request,
+    travel_id: int
+):
+    """
+    Get comprehensive travel details including all events for all dates.
+    
+    Args:
+        request: FastAPI request object
+        travel_id: ID of the travel to retrieve
+    
+    Returns:
+        Complete travel information with all events
+    
+    Raises:
+        HTTPException: For validation errors, not found, or database failures
+    """
+    try:
+        # Log the request
+        logger.info(f"Getting comprehensive travel details with ID: {travel_id}")
+        
+        # Validate travel_id parameter
+        if travel_id <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Travel ID must be a positive integer"
+            )
+        
+        # Query database for travel
+        travel_query = """
+            SELECT id, title, description, start_date, end_date, destination, 
+                   is_deleted, created_at, updated_at
+            FROM travels 
+            WHERE id = ?
+        """
+        
+        travel_data = fetch_one(travel_query, (travel_id,))
+        
+        # Check if travel exists
+        if not travel_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Travel with ID {travel_id} not found"
+            )
+        
+        # Check if travel is soft deleted
+        if travel_data["is_deleted"] == 1:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail=f"Travel with ID {travel_id} has been deleted"
+            )
+        
+        # Get all events for this travel with event type details
+        events_query = """
+            SELECT e.id, e.travel_id, e.title, e.description, e.event_type_id,
+                   e.start_datetime, e.end_datetime, e.location, e.created_at, e.updated_at,
+                   et.name as event_type_name, et.color as event_type_color, et.icon as event_type_icon
+            FROM events e
+            LEFT JOIN event_types et ON e.event_type_id = et.id
+            WHERE e.travel_id = ? AND e.is_deleted = 0
+            ORDER BY e.start_datetime ASC
+        """
+        
+        events_data = fetch_all(events_query, (travel_id,))
+        
+        # Transform events data to response format
+        events = []
+        for event in events_data:
+            events.append(EventDetailResponse(
+                id=event["id"],
+                title=event["title"],
+                description=event["description"],
+                event_type_id=event["event_type_id"],
+                event_type_name=event["event_type_name"],
+                event_type_color=event["event_type_color"],
+                event_type_icon=event["event_type_icon"],
+                start_datetime=event["start_datetime"],
+                end_datetime=event["end_datetime"],
+                location=event["location"],
+                created_at=event["created_at"],
+                updated_at=event["updated_at"]
+            ))
+        
+        # Create comprehensive travel response
+        comprehensive_travel = ComprehensiveTravelResponse(
+            id=travel_data["id"],
+            title=travel_data["title"],
+            description=travel_data["description"],
+            start_date=travel_data["start_date"],
+            end_date=travel_data["end_date"],
+            destination=travel_data["destination"],
+            events=events,
+            total_events=len(events),
+            created_at=travel_data["created_at"],
+            updated_at=travel_data["updated_at"]
+        )
+        
+        # Log the response
+        logger.info(f"Successfully retrieved comprehensive travel with ID: {travel_id}, total events: {len(events)}")
+        
+        # Create and return response
+        response = GetComprehensiveTravelResponse(
+            success=True,
+            data=comprehensive_travel
+        )
+        
+        return response
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Log the error
+        log_error(e, request, {"endpoint": "get_comprehensive_travel", "travel_id": travel_id})
+        
+        # Return error response
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve comprehensive travel details"
         )
 
 # Route: PUT /:id - Update travel
